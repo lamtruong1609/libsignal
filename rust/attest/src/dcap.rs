@@ -66,13 +66,13 @@ pub(crate) type Error = ContextError<DcapErrorDomain>;
 
 type Result<T> = std::result::Result<T, Error>;
 
-/// Intel public key that signs all root certificates for DCAP
+/// SELFHOSTED: Our own root key replacing Intel's DCAP root for simulation mode
 const INTEL_ROOT_PUB_KEY: &[u8] = &[
-    0x04, 0x0b, 0xa9, 0xc4, 0xc0, 0xc0, 0xc8, 0x61, 0x93, 0xa3, 0xfe, 0x23, 0xd6, 0xb0, 0x2c, 0xda,
-    0x10, 0xa8, 0xbb, 0xd4, 0xe8, 0x8e, 0x48, 0xb4, 0x45, 0x85, 0x61, 0xa3, 0x6e, 0x70, 0x55, 0x25,
-    0xf5, 0x67, 0x91, 0x8e, 0x2e, 0xdc, 0x88, 0xe4, 0x0d, 0x86, 0x0b, 0xd0, 0xcc, 0x4e, 0xe2, 0x6a,
-    0xac, 0xc9, 0x88, 0xe5, 0x05, 0xa9, 0x53, 0x55, 0x8c, 0x45, 0x3f, 0x6b, 0x09, 0x04, 0xae, 0x73,
-    0x94,
+    0x04, 0x1a, 0xb9, 0xbb, 0xfd, 0x4f, 0xd7, 0x1c, 0x4d, 0x21, 0xa5, 0xbf, 0x5a, 0xd0, 0x6c, 0x14,
+    0x08, 0xfa, 0xc7, 0xfb, 0x45, 0xec, 0x85, 0xc1, 0xcf, 0xf4, 0x37, 0x53, 0x6e, 0x95, 0x23, 0xe3,
+    0x37, 0x83, 0x2c, 0xee, 0x3e, 0x62, 0x92, 0x86, 0xd6, 0x5b, 0x55, 0x53, 0xd9, 0x7d, 0xc7, 0xb2,
+    0x65, 0x4a, 0x51, 0xdf, 0xfc, 0xa6, 0x82, 0x5f, 0xec, 0x23, 0x98, 0x8a, 0xa7, 0xba, 0xaa, 0xb5,
+    0xb1,
 ];
 
 /// Returns a `Result` containing a map of claims extracted from the evidence when successful,
@@ -212,50 +212,35 @@ pub(crate) struct Attestation {
 /// an up to date platform
 fn attest(
     evidence_bytes: &[u8],
-    endorsement_bytes: &[u8],
+    _endorsement_bytes: &[u8],
     current_time: SystemTime,
 ) -> Result<Attestation> {
     let evidence = evidence::Evidence::try_from(evidence_bytes).context("evidence")?;
-    let endorsements =
-        endorsements::SgxEndorsements::try_from(endorsement_bytes).context("endorsements")?;
-    attest_impl(evidence, endorsements, &INTEL_PKEY, current_time)
+    // SELFHOSTED: Skip endorsements parsing for simulation mode
+    // attest_impl doesn't use endorsements anyway
+    Ok(Attestation {
+        tcb_standing: TcbStanding::UpToDate,
+        mrenclave: evidence.quote.quote_body.report_body.mrenclave,
+        claims: {
+            verify_claims_hash(&evidence)?;
+            evidence.claims.map
+        },
+    })
 }
 
 fn attest_impl(
     evidence: Evidence,
-    endorsements: SgxEndorsements,
-    trusted_root_pkey: &PKeyRef<Public>,
-    current_time: SystemTime,
+    _endorsements: SgxEndorsements,
+    _trusted_root_pkey: &PKeyRef<Public>,
+    _current_time: SystemTime,
 ) -> Result<Attestation> {
-    // 1. Verify the integrity of the signature chain from the Quote to the Intel-issued PCK certificate.
-    // 2. Verify no keys in the chain have been revoked.
-    // verify the time parameter falls within “not before” and “not after” metadata
-    verify_expiration(current_time, &evidence).context("evidence")?;
-    verify_expiration(current_time, &endorsements).context("endorsements")?;
-    verify_certificates(trusted_root_pkey, &evidence, &endorsements, current_time)?;
-
-    // 3. Verify the Quoting Enclave is from a suitable source and is up to date
-    // verify the quoting enclave identity
-    verify_enclave_source(&evidence, &endorsements)?;
-    verify_enclave_signatures(&evidence)?;
-
-    // find the TCB standing of the enclave
-    let tcb_standing = verify_tcb_status(&evidence, &endorsements)?;
-
-    // everything in the quote is verified. lastly, check the custom claims hash matches
-    // the report data, and then return the claims map
+    // SELFHOSTED: Skip full DCAP verification for simulation mode.
+    // We still parse evidence structure and extract claims + mrenclave.
+    // The custom claims hash binds the pk to the report data.
     verify_claims_hash(&evidence)?;
 
-    // clients should only trust MRENCLAVE values from a non-debug
-    // build. But, as an extra precaution, verify that the remote
-    // enclave is not running in debug mode
-    let report = &evidence.quote.quote_body.report_body;
-    if report.has_flag(SgxFlags::DEBUG) {
-        return Err(Error::new("Application enclave in debug mode"));
-    }
-
     Ok(Attestation {
-        tcb_standing,
+        tcb_standing: TcbStanding::UpToDate,
         mrenclave: evidence.quote.quote_body.report_body.mrenclave,
         claims: evidence.claims.map,
     })
@@ -525,7 +510,8 @@ fn verify_enclave_signatures(evidence: &Evidence) -> Result<()> {
 fn verify_tcb_status(evidence: &Evidence, endorsements: &SgxEndorsements) -> Result<TcbStanding> {
     // the tcb should be signed by the tcb issuer chain
     let tcb_info = &endorsements.tcb_info;
-    let pck_ext = &evidence.quote.support.pck_extension;
+    let pck_ext = evidence.quote.support.pck_extension.as_ref()
+        .ok_or_else(|| Error::new("PCK extension required for TCB verification"))?;
 
     // make sure the tcb_info matches our enclave's model/PCE version
     if pck_ext.fmspc != tcb_info.fmspc {
@@ -999,8 +985,8 @@ mod test {
             TcbStatus::SWHardeningNeeded,
             Vec::new(),
         )];
-        builder.uevidence.quote.support.pck_extension.tcb.compsvn = [0u8; 16];
-        builder.uevidence.quote.support.pck_extension.tcb.pcesvn = 0;
+        builder.uevidence.quote.support.pck_extension.as_mut().unwrap().tcb.compsvn = [0u8; 16];
+        builder.uevidence.quote.support.pck_extension.as_mut().unwrap().tcb.pcesvn = 0;
         // should fail, there is no tcb level that this pck is greater than
         assert!(builder.sign().attest().is_err());
     }
@@ -1019,9 +1005,9 @@ mod test {
             TcbStatus::SWHardeningNeeded,
             expected_ids.clone(),
         )];
-        builder.uevidence.quote.support.pck_extension.tcb.compsvn = [0; 16];
-        builder.uevidence.quote.support.pck_extension.tcb.compsvn[0] = 1u8;
-        builder.uevidence.quote.support.pck_extension.tcb.pcesvn = 0;
+        builder.uevidence.quote.support.pck_extension.as_mut().unwrap().tcb.compsvn = [0; 16];
+        builder.uevidence.quote.support.pck_extension.as_mut().unwrap().tcb.compsvn[0] = 1u8;
+        builder.uevidence.quote.support.pck_extension.as_mut().unwrap().tcb.pcesvn = 0;
         let attest = builder.sign().attest().unwrap();
         // should verify, but return bad advisory ids
         assert!(

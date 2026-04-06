@@ -8,8 +8,7 @@ use std::collections::HashMap;
 use prost::Message;
 
 use crate::dcap;
-use crate::dcap::evidence::Evidence;
-use crate::enclave::{Claims, Handshake, HandshakeType, Result};
+use crate::enclave::{Handshake, HandshakeType, Result};
 use crate::proto::cds2;
 use crate::util::get_sw_advisories;
 
@@ -20,29 +19,15 @@ pub fn new_handshake(
 ) -> Result<Handshake> {
     // Deserialize attestation handshake start.
     let handshake_start = cds2::ClientHandshakeStart::decode(attestation_msg)?;
-
-    // SELFHOSTED: Try normal attestation first, fall back to simulation mode bypass
-    match Handshake::for_sgx(
+    Ok(Handshake::for_sgx(
         mrenclave,
         &handshake_start.evidence,
         &handshake_start.endorsement,
         get_sw_advisories(mrenclave),
         current_time,
         HandshakeType::PostQuantum,
-    ) {
-        Ok(handshake) => Ok(handshake.skip_raft_validation()),
-        Err(_) => {
-            // Simulation mode: extract public key from evidence without DCAP verification
-            log::warn!("DCAP attestation failed, attempting simulation mode bypass");
-            let evidence = Evidence::try_from(handshake_start.evidence.as_slice())
-                .map_err(|e| crate::enclave::Error::AttestationDataError {
-                    reason: format!("Failed to parse evidence: {}", e),
-                })?;
-            let claims = Claims::from_custom_claims(evidence.claims.map)?;
-            Ok(Handshake::with_claims(claims, HandshakeType::PostQuantum)?
-                .skip_raft_validation())
-        }
-    }
+    )?
+    .skip_raft_validation())
 }
 
 /// Extracts attestation metrics from a `ClientHandshakeStart` message

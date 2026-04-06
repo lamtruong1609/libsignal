@@ -192,7 +192,7 @@ pub(crate) struct SgxQuoteSupport<'a> {
     /// the certificate chain for the pck signer
     pub pck_cert_chain: CertChain,
     /// custom SGX extension that should be present on the pck signer cert
-    pub pck_extension: SgxPckExtension,
+    pub pck_extension: Option<SgxPckExtension>,
 }
 
 /// Validates the signature of the QE report, which must be
@@ -232,9 +232,8 @@ impl<'a> SgxQuoteSupport<'a> {
         let pck_cert_chain = util::read_bytes(src, cert_data_size);
         let pck_cert_chain = CertChain::from_pem_data(pck_cert_chain).context("CertChain")?;
 
-        // deserialize the custom intel sgx extension on the pck certificate
-        // find the extension on the pck_cert that has the sgx ext OID
-        let pck_ext = pck_cert_chain
+        // SELFHOSTED: PCK extension is optional for simulation mode
+        let pck_extension = pck_cert_chain
             .leaf()
             .extensions()
             .and_then(|extensions| {
@@ -242,9 +241,7 @@ impl<'a> SgxQuoteSupport<'a> {
                     .iter()
                     .find(|ext| SgxPckExtension::is_pck_ext(ext.object()))
             })
-            .ok_or_else(|| Error::new("PCK certificate is missing SGX extension"))?;
-        let pck_extension =
-            SgxPckExtension::from_der(pck_ext.data().as_slice()).context("SgxPckExtension")?;
+            .and_then(|pck_ext| SgxPckExtension::from_der(pck_ext.data().as_slice()).ok());
 
         let signature = SgxQuoteSupport {
             isv_signature: ecdsa_signature_from_bytes(&header.signature)
