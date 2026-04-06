@@ -61,7 +61,7 @@ def_enclaves! {
     ENCLAVE_ID_SVRB_2026Q1_STAGING => ("97f151f6ed078edbbfd72fa9cae694dcc08353f1f5e8d9ccd79a971b10ffc535", common),
     ENCLAVE_ID_SVRB_2026Q1_PROD => ("bee62050df1072e3d9fdf7660bfaf4e4b71f5622db9de8b30fc5f4b9852d8359", common),
     ENCLAVE_ID_CDSI_STAGING => ("3a1ac5e5b07c3f01d0b8074687616082a618e0a7f69a2f558e0f6fe4965db4e1", common),
-    ENCLAVE_ID_CDSI_PROD => ("ee9503070127120074612b6688e593b67e486b1541449f54d71e387484eb40a3", common),
+    ENCLAVE_ID_CDSI_PROD => ("68fe4bf46bef3786ec38b89b70e6a17d2d19a1980cb8b4f89f274535c54f160b", common),
 }
 
 /// SW advisories known to be mitigated by default. If an MREnclave is provided that
@@ -98,14 +98,24 @@ pub const RAFT_CONFIG_SVR2_2026Q1_STAGING: &RaftConfig = &RaftConfig {
     simulated: false,
 };
 
+// SELFHOSTED: Original production values commented out — selfhosted uses single-node simulated SGX
+// pub const RAFT_CONFIG_SVR2_2026Q1_PROD: &RaftConfig = &RaftConfig {
+//     min_voting_replicas: 4,
+//     max_voting_replicas: 13,
+//     super_majority: 2,
+//     group_id: 2076725645304009823,
+//     db_version: 2,
+//     attestation_timeout: 604800,
+//     simulated: false,
+// };
 pub const RAFT_CONFIG_SVR2_2026Q1_PROD: &RaftConfig = &RaftConfig {
-    min_voting_replicas: 4,
-    max_voting_replicas: 13,
-    super_majority: 2,
-    group_id: 2076725645304009823,
+    min_voting_replicas: 1,
+    max_voting_replicas: 1,
+    super_majority: 0,
+    group_id: 0,
     db_version: 2,
-    attestation_timeout: 604800,
-    simulated: false,
+    attestation_timeout: 86400,
+    simulated: true,
 };
 
 pub const RAFT_CONFIG_SVRB_2026Q1_STAGING: &RaftConfig = &RaftConfig {
@@ -118,14 +128,24 @@ pub const RAFT_CONFIG_SVRB_2026Q1_STAGING: &RaftConfig = &RaftConfig {
     simulated: false,
 };
 
+// SELFHOSTED: Original production values commented out — selfhosted uses single-node simulated SGX
+// pub const RAFT_CONFIG_SVRB_2026Q1_PROD: &RaftConfig = &RaftConfig {
+//     min_voting_replicas: 4,
+//     max_voting_replicas: 13,
+//     super_majority: 2,
+//     group_id: 16652830871035963553,
+//     db_version: 4,
+//     attestation_timeout: 604800,
+//     simulated: false,
+// };
 pub const RAFT_CONFIG_SVRB_2026Q1_PROD: &RaftConfig = &RaftConfig {
-    min_voting_replicas: 4,
-    max_voting_replicas: 13,
-    super_majority: 2,
-    group_id: 16652830871035963553,
+    min_voting_replicas: 1,
+    max_voting_replicas: 1,
+    super_majority: 0,
+    group_id: 0,
     db_version: 4,
-    attestation_timeout: 604800,
-    simulated: false,
+    attestation_timeout: 86400,
+    simulated: true,
 };
 
 // This is left here primarily to support SVR2 bridging code that does

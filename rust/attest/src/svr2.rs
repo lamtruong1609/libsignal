@@ -6,9 +6,12 @@
 use prost::Message;
 
 use crate::constants::EXPECTED_RAFT_CONFIG_SVR2;
-use crate::enclave::{Error, Handshake, HandshakeType, Result};
+use crate::enclave::{Claims, Error, Handshake, HandshakeType, Result};
 use crate::proto::svr;
 use crate::util::get_sw_advisories;
+
+// SELFHOSTED: Prefix used by SVR2 enclave in OpenEnclave simulation mode
+const UNATTESTED_EVIDENCE_PREFIX: &[u8] = b"UNATTESTED EVIDENCE:";
 
 /// A RaftConfig that can be checked against the attested remote config
 #[derive(Debug)]
@@ -24,10 +27,13 @@ pub struct RaftConfig {
 
 impl PartialEq<svr::RaftGroupConfig> for RaftConfig {
     fn eq(&self, pb: &svr::RaftGroupConfig) -> bool {
-        pb.min_voting_replicas == self.min_voting_replicas
+        // SELFHOSTED: In simulated mode, group_id is auto-generated at raft creation
+        // and can't be known at compile time — skip the check
+        let group_id_matches = self.simulated || pb.group_id == self.group_id;
+        group_id_matches
+            && pb.min_voting_replicas == self.min_voting_replicas
             && pb.max_voting_replicas == self.max_voting_replicas
             && pb.super_majority == self.super_majority
-            && pb.group_id == self.group_id
             && pb.db_version == self.db_version
             && pb.attestation_timeout == self.attestation_timeout
             && pb.simulated == self.simulated
@@ -89,6 +95,20 @@ fn new_handshake_with_constants(
 ) -> Result<Handshake> {
     // Deserialize attestation handshake start.
     let handshake_start = svr::ClientHandshakeStart::decode(attestation_msg)?;
+
+    // SELFHOSTED: In simulation mode, SVR2 enclave produces "UNATTESTED EVIDENCE:" + AttestationData
+    // instead of real SGX DCAP quotes. Extract the public key and raft config directly.
+    if handshake_start
+        .evidence
+        .starts_with(UNATTESTED_EVIDENCE_PREFIX)
+    {
+        let attestation_bytes = &handshake_start.evidence[UNATTESTED_EVIDENCE_PREFIX.len()..];
+        let attestation_data = svr::AttestationData::decode(attestation_bytes)?;
+        let claims = Claims::from_attestation_data(attestation_data)?;
+        return Handshake::with_claims(claims, handshake_type)
+            .map(|h| h.skip_raft_validation());
+    }
+
     let handshake = Handshake::for_sgx(
         mrenclave,
         &handshake_start.evidence,
