@@ -105,7 +105,8 @@ fn new_handshake_with_constants(
         let attestation_bytes = &handshake_start.evidence[UNATTESTED_EVIDENCE_PREFIX.len()..];
         let attestation_data = svr::AttestationData::decode(attestation_bytes)?;
         let claims = Claims::from_attestation_data(attestation_data)?;
-        return Handshake::with_claims(claims, handshake_type)
+        // SELFHOSTED: Use PreQuantum (NK pattern) — simulated enclave has client_pq=false by default
+        return Handshake::with_claims(claims, HandshakeType::PreQuantum)
             .map(|h| h.skip_raft_validation());
     }
 
